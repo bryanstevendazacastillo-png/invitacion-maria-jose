@@ -453,6 +453,37 @@
     color:var(--rose) !important;
     margin-top:0.9rem !important;
   }
+  .guest-select{
+    display:block;
+    width:100%;
+    max-width:300px;
+    margin:1.6rem auto 0;
+    padding:0.85rem 1.1rem;
+    font-family:'Cormorant Garamond', Georgia, serif;
+    font-size:1.05rem;
+    color:var(--ink);
+    background:#fffaf6;
+    border:1px solid var(--rose-gold-2);
+    border-radius:999px;
+    text-align:center;
+    text-align-last:center;
+    appearance:none;
+    -webkit-appearance:none;
+  }
+  .rsvp-message{
+    font-size:1.05rem !important;
+    line-height:1.5;
+    max-width:30ch;
+    margin:1.2rem auto 0 !important;
+    color:var(--rose) !important;
+  }
+  .rsvp-hint{
+    font-family:'Jost', sans-serif;
+    font-size:0.72rem !important;
+    letter-spacing:0.04em;
+    color:var(--ink-soft) !important;
+    margin-top:0.7rem !important;
+  }
 
   .closing{
     text-align:center;
@@ -601,9 +632,16 @@
     <section class="rsvp reveal" id="confirmar">
       <p class="eyebrow">Confirma tu asistencia</p>
       <h2>Tu lugar es único</h2>
-      <p>Ayúdame a prepararlo todo confirmando tu asistencia.</p>
-      <a class="btn btn-solid" id="rsvp-btn" href="#" target="_blank" rel="noopener">Confirmar asistencia</a>
-      <p class="rsvp-note" id="rsvp-note" hidden>Formulario en preparación — muy pronto podrás confirmar aquí 💌</p>
+      <p>Busca tu nombre en la lista para ver tu confirmación.</p>
+
+      <select class="guest-select" id="guest-select">
+        <option value="" selected disabled>Cargando invitados…</option>
+      </select>
+
+      <p class="rsvp-message" id="rsvp-message" hidden></p>
+      <a class="btn btn-solid" id="rsvp-btn" href="#" target="_blank" rel="noopener" hidden>Confirmar asistencia</a>
+      <p class="rsvp-hint" id="rsvp-hint" hidden>Se abrirá el formulario con tu nombre ya escrito — solo dale enviar.</p>
+      <p class="rsvp-note" id="rsvp-note" hidden>No pudimos cargar la lista de invitados. Escríbele a quien te invitó para confirmar.</p>
     </section>
 
     <footer class="closing reveal">
@@ -620,19 +658,60 @@
 
 <script>
   (function(){
-    // ---- Enlace del formulario de RSVP: reemplazar aquí cuando esté listo ----
-    var RSVP_URL = "PENDIENTE";
+    // ---- Confirmación de asistencia: lista de invitados + formulario prellenado ----
+    var CUPOS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRin6DUOluXU7mLy_KVHWeAiGoQQ8HBS7JvDIho_gfZwUELqW9N6uLhOReFrUsvab8TUVZypTcIY9rL/pub?output=csv";
+    var FORM_BASE = "https://docs.google.com/forms/d/e/1FAIpQLSevza-Agy-eRCJqkpRtQ3XWtJx7e-m_xsUW-rmgZCwbEiCPPA/viewform";
+    var ENTRY_NOMBRE = "entry.1090112754";
 
+    var guestSelect = document.getElementById('guest-select');
+    var rsvpMessage = document.getElementById('rsvp-message');
     var rsvpBtn = document.getElementById('rsvp-btn');
+    var rsvpHint = document.getElementById('rsvp-hint');
     var rsvpNote = document.getElementById('rsvp-note');
-    if (RSVP_URL === "PENDIENTE") {
-      rsvpBtn.addEventListener('click', function(e){
-        e.preventDefault();
+    var guestData = [];
+
+    function parseCupos(csvText){
+      var lines = csvText.split(/\r?\n/).filter(function(l){ return l.trim().length; });
+      var rows = [];
+      for (var i = 1; i < lines.length; i++) {
+        var idx = lines[i].lastIndexOf(',');
+        if (idx === -1) continue;
+        var nombre = lines[i].slice(0, idx).trim();
+        var cupos = parseInt(lines[i].slice(idx + 1).trim(), 10);
+        if (nombre && !isNaN(cupos)) rows.push({ nombre: nombre, cupos: cupos });
+      }
+      return rows;
+    }
+
+    fetch(CUPOS_CSV_URL)
+      .then(function(r){ if (!r.ok) throw new Error('bad response'); return r.text(); })
+      .then(function(text){
+        guestData = parseCupos(text);
+        guestSelect.innerHTML = '<option value="" selected disabled>Selecciona tu nombre</option>';
+        guestData.forEach(function(row){
+          var opt = document.createElement('option');
+          opt.value = row.nombre;
+          opt.textContent = row.nombre;
+          guestSelect.appendChild(opt);
+        });
+      })
+      .catch(function(){
+        guestSelect.hidden = true;
         rsvpNote.hidden = false;
       });
-    } else {
-      rsvpBtn.setAttribute('href', RSVP_URL);
-    }
+
+    guestSelect.addEventListener('change', function(){
+      var nombre = guestSelect.value;
+      var row = guestData.filter(function(r){ return r.nombre === nombre; })[0];
+      if (!row) return;
+      rsvpMessage.textContent = row.cupos === 1
+        ? 'Hola, ' + nombre + ' 👋 Tienes 1 cupo reservado. ¡Te esperamos para celebrar este día tan especial!'
+        : 'Hola, ' + nombre + ' 👋 Tienes un total de ' + row.cupos + ' cupos reservados. ¡Los esperamos para celebrar este día tan especial!';
+      rsvpMessage.hidden = false;
+      rsvpBtn.setAttribute('href', FORM_BASE + '?usp=pp_url&' + ENTRY_NOMBRE + '=' + encodeURIComponent(nombre));
+      rsvpBtn.hidden = false;
+      rsvpHint.hidden = false;
+    });
 
     // ---- Reproductor de audio ----
     var song = document.getElementById('song');
