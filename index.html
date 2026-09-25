@@ -692,6 +692,10 @@
     // Fuente: hoja "Cupos Invitados" leída en vivo via gviz (no depende de "Publicar en la Web",
     // que se puede romper si alguien reabre esa opcion mientras tiene una celda seleccionada).
     var CUPOS_CSV_URL = "https://docs.google.com/spreadsheets/d/1jI12pwyDdlZr9GO07wgt-FgRrTPfAU7mKsCNL1Nwt3I/gviz/tq?tqx=out:csv&gid=0";
+    // Hoja de respuestas del formulario: se usa para ocultar de la busqueda a quien ya respondio
+    // (Si o No), evitando confirmaciones duplicadas. Si esta lectura falla, no se bloquea el flujo:
+    // simplemente se muestra la lista completa sin filtrar.
+    var CONFIRMADOS_CSV_URL = "https://docs.google.com/spreadsheets/d/1siqqjTXQSAwG6JdCRiwrYHxpBUqYWoDDoPPm1kIG72U/gviz/tq?tqx=out:csv&gid=829000853";
     var FORM_BASE = "https://docs.google.com/forms/d/e/1FAIpQLSevza-Agy-eRCJqkpRtQ3XWtJx7e-m_xsUW-rmgZCwbEiCPPA/viewform";
     var ENTRY_NOMBRE = "entry.1090112754";
 
@@ -740,10 +744,30 @@
       return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
     }
 
+    function parseConfirmados(csvText){
+      var lines = csvText.split(/\r?\n/).filter(function(l){ return l.trim().length; });
+      var confirmados = {};
+      for (var i = 1; i < lines.length; i++) {
+        var cols = parseCSVLine(lines[i]);
+        var nombre = (cols[1] || '').trim();
+        if (nombre) confirmados[normalizar(nombre)] = true;
+      }
+      return confirmados;
+    }
+
     fetch(CUPOS_CSV_URL)
       .then(function(r){ if (!r.ok) throw new Error('bad response'); return r.text(); })
-      .then(function(text){
-        guestData = parseCupos(text);
+      .then(function(text){ guestData = parseCupos(text); })
+      .then(function(){
+        return fetch(CONFIRMADOS_CSV_URL)
+          .then(function(r){ if (!r.ok) throw new Error('bad response'); return r.text(); })
+          .then(function(text){
+            var confirmados = parseConfirmados(text);
+            guestData = guestData.filter(function(g){ return !confirmados[normalizar(g.nombre)]; });
+          })
+          .catch(function(){ /* no se pudo leer quien ya confirmo: no bloquear, mostrar lista completa */ });
+      })
+      .then(function(){
         guestSearch.disabled = false;
         guestSearch.placeholder = 'Toca para ver la lista o escribe tu nombre…';
       })
