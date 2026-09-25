@@ -453,11 +453,15 @@
     color:var(--rose) !important;
     margin-top:0.9rem !important;
   }
-  .guest-select{
-    display:block;
+  .guest-search-wrap{
+    position:relative;
     width:100%;
     max-width:300px;
     margin:1.6rem auto 0;
+  }
+  .guest-search{
+    display:block;
+    width:100%;
     padding:0.85rem 1.1rem;
     font-family:'Cormorant Garamond', Georgia, serif;
     font-size:1.05rem;
@@ -466,9 +470,33 @@
     border:1px solid var(--rose-gold-2);
     border-radius:999px;
     text-align:center;
-    text-align-last:center;
-    appearance:none;
-    -webkit-appearance:none;
+  }
+  .guest-search::placeholder{ color:var(--ink-soft); opacity:0.8; }
+  .guest-suggestions{
+    position:absolute;
+    left:0; right:0; top:calc(100% + 6px);
+    max-height:220px;
+    overflow-y:auto;
+    background:#fffaf6;
+    border:1px solid var(--line);
+    border-radius:16px;
+    box-shadow:0 14px 26px -12px rgba(140,75,86,0.35);
+    z-index:5;
+    text-align:left;
+  }
+  .guest-suggestion{
+    padding:0.6rem 1.1rem;
+    font-size:0.98rem;
+    color:var(--ink);
+    cursor:pointer;
+  }
+  .guest-suggestion:hover, .guest-suggestion.active{
+    background:var(--panel);
+  }
+  .guest-suggestion.empty{
+    color:var(--ink-soft);
+    font-style:italic;
+    cursor:default;
   }
   .rsvp-message{
     font-size:1.05rem !important;
@@ -632,11 +660,12 @@
     <section class="rsvp reveal" id="confirmar">
       <p class="eyebrow">Confirma tu asistencia</p>
       <h2>Tu lugar es único</h2>
-      <p>Busca tu nombre en la lista para ver tu confirmación.</p>
+      <p>Escribe tu nombre para ver tu confirmación.</p>
 
-      <select class="guest-select" id="guest-select">
-        <option value="" selected disabled>Cargando invitados…</option>
-      </select>
+      <div class="guest-search-wrap">
+        <input type="text" class="guest-search" id="guest-search" placeholder="Cargando invitados…" autocomplete="off" disabled>
+        <div class="guest-suggestions" id="guest-suggestions" hidden></div>
+      </div>
 
       <p class="rsvp-message" id="rsvp-message" hidden></p>
       <a class="btn btn-solid" id="rsvp-btn" href="#" target="_blank" rel="noopener" hidden>Confirmar asistencia</a>
@@ -659,58 +688,129 @@
 <script>
   (function(){
     // ---- Confirmación de asistencia: lista de invitados + formulario prellenado ----
-    var CUPOS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRin6DUOluXU7mLy_KVHWeAiGoQQ8HBS7JvDIho_gfZwUELqW9N6uLhOReFrUsvab8TUVZypTcIY9rL/pub?output=csv";
+    // Fuente: hoja "Cupos Invitados" leída en vivo via gviz (no depende de "Publicar en la Web",
+    // que se puede romper si alguien reabre esa opcion mientras tiene una celda seleccionada).
+    var CUPOS_CSV_URL = "https://docs.google.com/spreadsheets/d/1jI12pwyDdlZr9GO07wgt-FgRrTPfAU7mKsCNL1Nwt3I/gviz/tq?tqx=out:csv&gid=0";
     var FORM_BASE = "https://docs.google.com/forms/d/e/1FAIpQLSevza-Agy-eRCJqkpRtQ3XWtJx7e-m_xsUW-rmgZCwbEiCPPA/viewform";
     var ENTRY_NOMBRE = "entry.1090112754";
 
-    var guestSelect = document.getElementById('guest-select');
+    var guestSearch = document.getElementById('guest-search');
+    var guestSuggestions = document.getElementById('guest-suggestions');
     var rsvpMessage = document.getElementById('rsvp-message');
     var rsvpBtn = document.getElementById('rsvp-btn');
     var rsvpHint = document.getElementById('rsvp-hint');
     var rsvpNote = document.getElementById('rsvp-note');
     var guestData = [];
 
+    function parseCSVLine(line){
+      var result = [];
+      var cur = '';
+      var inQuotes = false;
+      for (var i = 0; i < line.length; i++) {
+        var ch = line[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            if (line[i + 1] === '"') { cur += '"'; i++; }
+            else { inQuotes = false; }
+          } else { cur += ch; }
+        } else {
+          if (ch === '"') { inQuotes = true; }
+          else if (ch === ',') { result.push(cur); cur = ''; }
+          else { cur += ch; }
+        }
+      }
+      result.push(cur);
+      return result;
+    }
+
     function parseCupos(csvText){
       var lines = csvText.split(/\r?\n/).filter(function(l){ return l.trim().length; });
       var rows = [];
       for (var i = 1; i < lines.length; i++) {
-        var idx = lines[i].lastIndexOf(',');
-        if (idx === -1) continue;
-        var nombre = lines[i].slice(0, idx).trim();
-        var cupos = parseInt(lines[i].slice(idx + 1).trim(), 10);
+        var cols = parseCSVLine(lines[i]);
+        var nombre = (cols[0] || '').trim();
+        var cupos = parseInt((cols[1] || '').trim(), 10);
         if (nombre && !isNaN(cupos)) rows.push({ nombre: nombre, cupos: cupos });
       }
       return rows;
+    }
+
+    function normalizar(s){
+      return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
     }
 
     fetch(CUPOS_CSV_URL)
       .then(function(r){ if (!r.ok) throw new Error('bad response'); return r.text(); })
       .then(function(text){
         guestData = parseCupos(text);
-        guestSelect.innerHTML = '<option value="" selected disabled>Selecciona tu nombre</option>';
-        guestData.forEach(function(row){
-          var opt = document.createElement('option');
-          opt.value = row.nombre;
-          opt.textContent = row.nombre;
-          guestSelect.appendChild(opt);
-        });
+        guestSearch.disabled = false;
+        guestSearch.placeholder = 'Escribe tu nombre…';
       })
       .catch(function(){
-        guestSelect.hidden = true;
+        guestSearch.hidden = true;
         rsvpNote.hidden = false;
       });
 
-    guestSelect.addEventListener('change', function(){
-      var nombre = guestSelect.value;
+    function selectGuest(nombre){
       var row = guestData.filter(function(r){ return r.nombre === nombre; })[0];
       if (!row) return;
+      guestSearch.value = row.nombre;
+      guestSuggestions.hidden = true;
+      guestSuggestions.innerHTML = '';
       rsvpMessage.textContent = row.cupos === 1
-        ? 'Hola, ' + nombre + ' 👋 Tienes 1 cupo reservado. ¡Te esperamos para celebrar este día tan especial!'
-        : 'Hola, ' + nombre + ' 👋 Tienes un total de ' + row.cupos + ' cupos reservados. ¡Los esperamos para celebrar este día tan especial!';
+        ? 'Hola, ' + row.nombre + ' 👋 Tienes 1 cupo reservado. ¡Te esperamos para celebrar este día tan especial!'
+        : 'Hola, ' + row.nombre + ' 👋 Tienes un total de ' + row.cupos + ' cupos reservados. ¡Los esperamos para celebrar este día tan especial!';
       rsvpMessage.hidden = false;
-      rsvpBtn.setAttribute('href', FORM_BASE + '?usp=pp_url&' + ENTRY_NOMBRE + '=' + encodeURIComponent(nombre));
+      rsvpBtn.setAttribute('href', FORM_BASE + '?usp=pp_url&' + ENTRY_NOMBRE + '=' + encodeURIComponent(row.nombre));
       rsvpBtn.hidden = false;
       rsvpHint.hidden = false;
+    }
+
+    function renderSuggestions(query){
+      var q = normalizar(query);
+      if (!q) { guestSuggestions.hidden = true; guestSuggestions.innerHTML = ''; return; }
+      var matches = guestData.filter(function(r){ return normalizar(r.nombre).indexOf(q) !== -1; }).slice(0, 8);
+      guestSuggestions.innerHTML = '';
+      if (matches.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'guest-suggestion empty';
+        empty.textContent = 'No encontramos ese nombre en la lista.';
+        guestSuggestions.appendChild(empty);
+      } else {
+        matches.forEach(function(row){
+          var item = document.createElement('div');
+          item.className = 'guest-suggestion';
+          item.textContent = row.nombre;
+          item.addEventListener('mousedown', function(e){
+            e.preventDefault();
+            selectGuest(row.nombre);
+          });
+          guestSuggestions.appendChild(item);
+        });
+      }
+      guestSuggestions.hidden = false;
+    }
+
+    guestSearch.addEventListener('input', function(){
+      rsvpMessage.hidden = true;
+      rsvpBtn.hidden = true;
+      rsvpHint.hidden = true;
+      renderSuggestions(guestSearch.value);
+    });
+    guestSearch.addEventListener('focus', function(){
+      if (guestSearch.value) renderSuggestions(guestSearch.value);
+    });
+    guestSearch.addEventListener('keydown', function(e){
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        var first = guestSuggestions.querySelector('.guest-suggestion:not(.empty)');
+        if (first) selectGuest(first.textContent);
+      }
+    });
+    document.addEventListener('click', function(e){
+      if (!guestSuggestions.contains(e.target) && e.target !== guestSearch) {
+        guestSuggestions.hidden = true;
+      }
     });
 
     // ---- Reproductor de audio ----
